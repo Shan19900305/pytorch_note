@@ -20,7 +20,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) { xxx }
  - 从代码结构上看，总体处理可以简化为如下处理：
     ```c++
     template<typename func_t, typename policy_t>
-    __global__ void func(func_t f, policy_t policy) {
+    __device__ void func(func_t f, policy_t policy) {
       int idx = blockIdx.x;
       // malloc local mem for output and input
       return_t results[thread_work_size()];
@@ -28,7 +28,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) { xxx }
       // threadIdx is in load func
       policy::load(args, idx);
       for (int i = 0; i < thread_work_size(); ++i) {
-        results[i] = f(args[i]);
+        results[i] = c10::guts::apply(f, args[i]);
       }
       // store result
       policy::store(result,idx);
@@ -90,8 +90,54 @@ A[launch_vectorized_kernel] --> C(call \ncan_vectorize_up_to \nto get vec size)
   When a warp executes an instruction that accesses global memory, it coalesces the memory accesses of the threads within the warp into one or more of these memory transactions depending on the size of the word accessed by each thread and the distribution of the memory addresses across the threads.
   Global memory resides in device memory and device memory is accessed via 32-, 64-, or 128-byte memory transactions. These memory transactions must be naturally aligned: Only the 32-, 64-, or 128-byte segments of device memory that are aligned to their size (i.e., whose first address is a multiple of their size) can be read or written by memory transactions.
 
-  - vectorized_elementwise_kernel： 函数主要分为两部分处理，及余数段和整数段处理。(此处不进行余数段介绍，其处理思路和连续场景下vec size == 1的处理逻辑基本一致。)
-    - memory::policies::vectorized<vec_size, array_t>， 构造策略policy对象。
+  - vectorized_elementwise_kernel： 函数主要分为余数段和整数段两部分处理。(此处不进行余数段介绍，其处理思路和连续场景下vec size == 1的处理逻辑基本一致。)
+    - memory::policies::vectorized<vec_size, array_t>， 构造策略policy对象;
+      - 其是一个基本的类实现，其中定义了load， store两种基本类型的函数调用，主要功能就是完成gdram和local memory之间的数据搬运;
+      - 其只支持多输入单输出场景;
+      ```c++
+      template<typename args_t>
+      __device__ inline void load(args_t *args, int idx) {
+        constexpr int arity = std::tuple_size<args_t>::value;
+        // static_unroll是一种通过递归方式，保证每一个输入都能将数据读取
+        detail::static_unroll<detail::vectorized_load_helper, arity>::with_args(*this, args, idx);
+      }
+      // 基于传入的arg index，进行数据加载。
+      template<int arg_index>
+      struct vectorized_load_helper {
+        template <typename args_t, typename policy_t>
+        static __device__ void apply(policy_t &self, args_t *args, int idx) {
+          using arg_t = std::tuple_element_t<arg_index, args_t>;
+          // `data` hold the data_ptr for tensors [output, input0, input1, ...], so we
+          // need a +1 offset to get the input
+          auto ptr = reinterpret_cast<arg_t *>(self.data[arg_index + 1]) + block_work_size() * idx;
+          auto args_accessor = [&args] __device__ (int thread_unroll_idx) -> arg_t & { 
+            return std::get<arg_index>(args[thread_unroll_idx]);
+            ```
+            local memory 数据排布：
+            | arg1 | arg2 | arg3 | ... |  argn | arg1 | arg2 | arg3 | ... |  argn |
+            ```
+          };
+          self.load_single_arg(args_accessor, ptr);
+        }
+      };
+      // 单个输入加载数据，基于threadIdx进行block内数据指针偏移。 其中load_vector将gdram上数据指针转换为对应对齐后的指针。对齐后数据大小为：vec_size * sizeof(dtype)。
+      template<typename accessor_t, typename scalar_t>
+      __device__ inline void load_single_arg(accessor_t to, scalar_t *from) {
+        int thread_idx = threadIdx.x;
+        #pragma unroll
+        for (int i = 0; i < loop_size; i++) {
+          int index = thread_idx + i * num_threads();
+          auto v = load_vector<vec_size>(from, index);
+          #pragma unroll
+          for (int j = 0; j < vec_size; j++) {
+            to(vec_size * i + j) = v.val[j];
+          }
+        }
+      }
+      ```
+    - 调用func函数完成op读数，运算和写回动作。
+  
+
 
 
 
