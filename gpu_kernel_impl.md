@@ -1,5 +1,5 @@
 # gpu_kernel_impl
-模板函数，入参为TensorIteratorBase对象和func_t对象, 其中算子的实现由func_t对象决定，而输入输出的数据由TensorIteratorBase对象决定。
+模板函数，入参为TensorIteratorBase对象和func_t对象, 其中算子的实现由func_t决定，而输入输出的数据类型和计算类型由TensorIteratorBase对象决定。
 ```c++
 template <typename func_t>
 void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) { xxx }
