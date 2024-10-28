@@ -1,5 +1,5 @@
 # gpu_kernel_impl
-模板函数，入参为TensorIteratorBase对象和func_t对象, 其中算子的实现由func_t决定，而输入输出的数据类型和计算类型由TensorIteratorBase对象决定。
+模板函数，入参为TensorIteratorBase对象和func_t对象, 其中算子的实现由func_t对象决定，而输入输出的数据由TensorIteratorBase对象决定。
 ```c++
 template <typename func_t>
 void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) { xxx }
@@ -92,13 +92,14 @@ A[launch_vectorized_kernel] --> C(call \ncan_vectorize_up_to \nto get vec size)
 
   - vectorized_elementwise_kernel： 函数主要分为余数段和整数段两部分处理。(此处不进行余数段介绍，其处理思路和连续场景下vec size == 1的处理逻辑基本一致。)
     - memory::policies::vectorized<vec_size, array_t>， 构造策略policy对象;
-      - 其是一个基本的类实现，其中定义了load， store两种基本类型的函数调用，主要功能就是完成gdram和local memory之间的数据搬运;
+      - 其是一个基本的类实现，其中定义了load， store两种基本类型的函数调用，主要功能就是完成gdram和local memory之间的数据搬运，其通过vec_t的方式进行数据加载，提升带宽利用率;
       - 其只支持多输入单输出场景;
       ```c++
       template<typename args_t>
       __device__ inline void load(args_t *args, int idx) {
         constexpr int arity = std::tuple_size<args_t>::value;
         // static_unroll是一种通过递归方式，保证每一个输入都能将数据读取
+        // 其中args_t为tuple类型，idx为blockIdx.x;
         detail::static_unroll<detail::vectorized_load_helper, arity>::with_args(*this, args, idx);
       }
       // 基于传入的arg index，进行数据加载。
