@@ -62,7 +62,9 @@ TensorIterator构建过程分为以下几步：
      - 如果满足fast路经，根据对应fast枚举值，创建或者resize output tensor为相同的shape和stride。
      - 如果满足fast路经，对所有的shape和stride进行维度折叠到维度1。
    - stride模式下相关函数处理：
-     - compute_strides：
+     - compute_strides：根据common shape计算对应operand的stride_bytes;
+       - 如果对应operand的维度为1且common shape对应维度不为1,则设置stride_bytes为0;
+       - 如果存在维度broadcast，同样也设置stride_bytes为0。
      - reorder_dimensions：根据stride计算permute的参数，调用permute_dimensions调整所有operands_的size和stride
      - allocate_or_resize_outputs：
      - coalesce_dimensions：
