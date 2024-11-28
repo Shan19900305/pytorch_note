@@ -2,47 +2,87 @@
 从0开始学习基本概率
 
 ## Hierarchy Layout
-Hierarchy layout相对torch中的size/stride进行了延伸，其支持嵌套结构的封装。论文中的说明：We introduce a novel representation for tensor shapes， layouts and tiles. Graphene’s tensors are decomposable into tiles represented as smaller nested tensors。表示方式为：((内部行数，外部行数1， 外部行数2，...)，(内部列数，外部列数1，外部列数2，...))。
- - 例子1：Hierarchy layout -> Normal layout
-   假设Hierarchy layout的shape为：((2，4)， (3，5))，stride为：((1， 6)， (2，24))。其表示内层数据块的shape为（2，3），且为行主序。外层数据块的shape为（4，5），且为列主序。
+Hierarchy layout相对torch中的size/stride进行了延伸,其支持嵌套结构的封装。论文中的说明:We introduce a novel representation for tensor shapes, layouts and tiles. Graphene's tensors are decomposable into tiles represented as smaller nested tensors。表示方式为:((内部行数,外部行数1, 外部行数2,...),(内部列数,外部列数1,外部列数2,...))。
+ - 例子1:Hierarchy layout -> Normal layout
+   假设Hierarchy layout的shape为:((2,4), (3,5)),stride为:((1, 6), (2,24))。其表示内层数据块的shape为(2,3),且为行主序。外层数据块的shape为(4,5),且为列主序。
    <img src="Hierarchy layout to normal layout.png" width="400" height="300">
-   转化为Normal Layout，其shape为：(4，5，2，3)，stride为：(6，24，3，1)。
-   对应取数坐标如下：
+   转化为Normal Layout,其shape为:(4,5,2,3),stride为:(6,24,3,1)。
+   对应取数坐标如下:
    auto row_coord = make_coord(1, 2); 
    auto col_coord = make_coord(2, 1); 
    auto coord = make_coord(row_coord, col_coord);
-   则对应外层数据块坐标为（2，1），内层数据块坐标为（1，2），也就是数值为41的坐标。转换为普通坐标可以认为是（2, 1, 1, 2），根据公式：2 × 6 + 24 + 3 + 2 × 1 = 41。
+   则对应外层数据块坐标为(2,1),内层数据块坐标为(1,2),也就是数值为41的坐标。转换为普通坐标可以认为是(2, 1, 1, 2),根据公式:2 * 6 + 24 + 3 + 2 * 1 = 41。
 
- - 例子2：Normal layout -> Hierarchy layout
-  假设torch的基本Tensor shape为（B，M，K），stride为（M × K，K，1），其表示为B个M×K大小的矩阵，其内部元素为K个连续的元素，外部元素为M×K个连续的元素。
-  转化为Hierarchy layout的表示范围为：shape为（M， (K， B)），stride为（K，（1， M × K）），也就是内层数据块为shape（M， K），stride为（K， 1）;外层数据块的shape为（1， B），stride为（1，M × K）。
+ - 例子2:Normal layout -> Hierarchy layout
+  假设torch的基本Tensor shape为(B,M,K),stride为(M * K,K,1),其表示为B个M*K大小的矩阵,其内部元素为K个连续的元素,外部元素为M*K个连续的元素。
+  转化为Hierarchy layout的表示范围为:shape为(M, (K, B)),stride为(K,(1, M * K)),也就是内层数据块为shape(M, K),stride为(K, 1);外层数据块的shape为(1, B),stride为(1,M * K)。
+
+## Tuple对象实现
+Layout实现的基本数据结构，相对与标准库tuple实现的更加简洁。特别地对于is_empty<T>为true的类型对象，不进行真实的构造存储，仅在get函数时进行构造返回。
+  ```mermaid
+    graph LR
+    A[struct tuple]  -->|inherit| B[struct TupleBase] -->|inherit| C[struct EBO]
+  ```
+### 基础实现：
+  - 基础存储单元EBO： 1）当IsEmpty为true时，不进行任何类型实例化，仅表示一个模板的特化类型; 2）当IsEmpty是false时，会真实地进行对象T实例化和存储。
+    ```mermaid
+      graph LR
+      A[struct EBO with template]  --> C[value = is_empty<T>::value>]
+        C -->|value == true| D[Only represents a specialized type of a template, don't do any instantiation.] --> F
+        C -->|value == false| E[init a value of type T, and stored in class.]  --> F[getv function with IsEmpty]
+        F -->|IsEmpty == true| G[return T instantiation]
+        F -->|IsEmpty == false| H[return t.t_]
+    ```
+    ```c++
+      template <size_t N, class T, bool IsEmpty = is_empty<T>::value>
+      struct EBO;
+    ```
+  - 转接TupleBase：其主要作用就是将参数模板展开，转接给各个EBO特化类。
+    ```c++
+      template <class IdxSeq, class... T>
+      struct TupleBase;
+
+      // Base class of cute::tuple binds each element to an index
+      // by inheriting from EBO<i, t> for each (i, t) in (I..., T...).
+      // The storage (for nonempty t) lives in the base classes.
+      template <size_t... I, class... T>
+      struct TupleBase<index_sequence<I...>, T...>
+          : EBO<I,T>...
+    ```
+  - tuple：面向用户侧使用，定义了各种处理方法。
+    ```c++
+      template <class... T>
+      struct tuple : detail::TupleBase<make_index_sequence<sizeof...(T)>, T...>
+    ```
+### 基本使用方式和运算方法
+
 
 ### 基本运算规则
- - coalesce：
+ - coalesce:
    
 
 
-probShape是实际输入的矩阵，tileShape是拆分维度信息，对gemm来说，tileShape这个是一个cluster处理的数据，刚好拆分给4个ipu。对unary来说，还要继续拆atomShape
+probShape是实际输入的矩阵,tileShape是拆分维度信息,对gemm来说,tileShape这个是一个cluster处理的数据,刚好拆分给4个ipu。对unary来说,还要继续拆atomShape
 
 template <class ElementwiseUnaryOperation,
           class ElementwiseUnaryLayout_ = Layout<Shape<_1, _1>>,
           class BlockTiler_     = Tile<Underscore, Underscore>,
           class AtomTiler_     = Tile<Underscore, Underscore>>
 struct TiledElementwiseUnary : ElementwiseUnary_Traits<ElementwiseUnaryOperation> {}
-参数说明：
-ElementwiseUnaryOperation：操作函数，如log，exp，sigmoid等。
-ElementwiseUnaryLayout_：表示block中各个Thread的排列方式，对应到MLU就是各个ipu的排列方式，默认为列主序;
-BlockTiler_：表示总的处理数据量;
-AtomTiler_：表示block中每个Thread处理的数据量，即AtomTiler按照ElementwiseUnaryLayout_排列，就是单次单个cluster处理的数据量。
+参数说明:
+ElementwiseUnaryOperation:操作函数,如log,exp,sigmoid等。
+ElementwiseUnaryLayout_:表示block中各个Thread的排列方式,对应到MLU就是各个ipu的排列方式,默认为列主序;
+BlockTiler_:表示总的处理数据量;
+AtomTiler_:表示block中每个Thread处理的数据量,即AtomTiler按照ElementwiseUnaryLayout_排列,就是单次单个cluster处理的数据量。
 
 
-TiledElementwiseUnary负责进行数据拆分，然后调用ElementwiseUnaryOperation进行计算。
+TiledElementwiseUnary负责进行数据拆分,然后调用ElementwiseUnaryOperation进行计算。
 
 
 
-论文链接： https://dl.acm.org/doi/pdf/10.1145/3582016.3582018
-参考资料： https://zhuanlan.zhihu.com/p/661182311
-参考资料： https://zhuanlan.zhihu.com/p/662089556
+论文链接: https://dl.acm.org/doi/pdf/10.1145/3582016.3582018
+参考资料: https://zhuanlan.zhihu.com/p/661182311
+参考资料: https://zhuanlan.zhihu.com/p/662089556
 
 # 辅助工具及方法
 ## 单测试用例执行方法
@@ -130,12 +170,12 @@ A constexpr constructor allows the construction of objects at compile time.(Form
           return 0;
       }
     ```
-参考链接：
+参考链接:
 https://learn.microsoft.com/en-us/cpp/cpp/constexpr-cpp?view=msvc-170
 https://en.cppreference.com/w/cpp/language/constexpr
 
 ## base class lookup
-取自GPT4o： base class lookup in C++, it means the compiler will examine the inheritance chain and the member declarations in the base classes to determine which one to use
+取自GPT4o: base class lookup in C++, it means the compiler will examine the inheritance chain and the member declarations in the base classes to determine which one to use
 https://isocpp.org/wiki/faq/strange-inheritance
  - example:
     ```c++
@@ -185,7 +225,7 @@ https://isocpp.org/wiki/faq/strange-inheritance
 
 
 ## Assignment operator for base and derived class.
-取自：https://www.quora.com/What-will-happen-in-C-if-the-base-class-has-a-defined-assignment-operator-but-the-derived-class-does-not
+取自:https://www.quora.com/What-will-happen-in-C-if-the-base-class-has-a-defined-assignment-operator-but-the-derived-class-does-not
 In C++, if the base class has a defined assignment operator but the derived class does not explicitly define one, the derived class will automatically inherit the assignment operator from the base class. However, there are important considerations regarding how the assignment operator works in this context:
 
  - Base Class Assignment Operator: If the base class has a user-defined assignment operator, that operator will be used when assigning one derived class object to another derived class object, but only the base part of the objects will be assigned. The derived part will not be properly handled unless the derived class explicitly defines its own assignment operator.
