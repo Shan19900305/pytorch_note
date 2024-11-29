@@ -54,8 +54,76 @@ Layout实现的基本数据结构，相对与标准库tuple实现的更加简洁
       template <class... T>
       struct tuple : detail::TupleBase<make_index_sequence<sizeof...(T)>, T...>
     ```
-### 基本使用方式和运算方法
 
+### 基本使用方式和运算方法
+ - rank: 获取对应维度元素个数，或者总的元素个数，其中嵌套结构算1个元素。
+  - example:
+     tuple<tuple<int, _2>, int, int>>tuple_3h_m(tuple<int,_2>(1,_2{}), 8, 2);
+     tuple<int, int, _2> tuple_3d_m(8,4,_2{});
+     rank(tuple_3h_m);     // Int<3>{}
+     rank<0>(tuple_3h_m);  // Int<2>{}
+     rank(tuple_3d_m);     // Int<3>{}
+  -code:
+   ```c++
+     template <int... Is, class IntTuple>
+     CUTE_HOST_DEVICE constexpr
+     auto
+     rank(IntTuple const& t)
+     {
+       if constexpr (sizeof...(Is) == 0) {
+         if constexpr (is_tuple<IntTuple>::value) {
+           return Int<tuple_size<IntTuple>::value>{};
+         } else {
+           return Int<1>{};
+         }
+       } else {
+         return rank(get<Is...>(t));
+       }
+       CUTE_GCC_UNREACHABLE;
+     }
+   ```
+
+ - product: 进行求内积的处理，使用折叠表达式进行运算处理。如果存在嵌套结构，则嵌套调用Product进行处理。
+            非tuple时，返回Int<1>{}。
+ - product_each: 对多个Tuple分别进行求内积。
+   - product example1:
+    tuple<tuple<int, _2>, int, int> tuple_3h_m(tuple<int,_2>(1,_2{}),8,2);
+    result: product(tuple_3h_m)  ->  32
+   - product example2:
+    tuple<tuple<_1, _2>, _3, _2> tuple_3h_m;
+    result：product(tuple_3h_m)  ->  _12{} // 类型不发生改变
+ - product_like：按照右操作数的元素个数，对左操作数进行求内积，类似理解按照归约操作。
+   - product_like example1：
+     tuple<tuple<int, _2>, int, int>>tuple_3h_m(tuple<int,_2>(1,_2{}), 8, 2);
+     tuple<int, int, _2> tuple_3d_m(8,4,_2{});
+     auto result = product_like(tuple_3h_m, tuple_3d_m); // tuple<int, int, int> result{2, 8, 2};
+   - code：
+    ```c++
+      struct Product
+      {
+        template <class IntTuple>
+        CUTE_HOST_DEVICE constexpr
+        auto
+        operator()(IntTuple const& a) const
+        {
+          if constexpr (is_tuple<IntTuple>::value) {
+            if constexpr (tuple_size<IntTuple>::value == 0) {
+              return Int<1>{};
+            } else {
+              // Product{} is a functor and used when a is nested structure.
+              return cute::transform_apply(a, Product{}, multiplies_unary_lfold{});
+            }
+          } else if constexpr (cute::is_integral<IntTuple>::value) {
+            return a;
+          }
+
+          CUTE_GCC_UNREACHABLE;
+        }
+      };
+      // Callable product function object
+      CUTE_INLINE_CONSTANT Product product;
+    ```
+ - max
 
 ### 基本运算规则
  - coalesce:
@@ -261,3 +329,19 @@ In C++, if the base class has a defined assignment operator but the derived clas
         // d2.derivedValue will be uninitialized (not copied)
       }
     ```
+## Fold Expressions（C++17）
+Fold expressions are a feature in C++ that allow you to perform operations on a range of elements in a container or array. They are a powerful tool for reducing the amount of code you need to write and make your code more concise and readable.
+ - left fold： 从左到右进行参数包处理，((1 + 2) + 3) + 4。
+  ```c++
+    template <typename... Args>
+    auto sum(Args... args) {
+      return (args + ...);  // 左折叠表达式
+    }
+  ```
+ - right fold：从右到左进行参数包处理，1 + (2 + (3 + 4))。
+  ```c++
+    template <typename... Args>
+    auto sum(Args... args) {
+      return (... + args);  // 右折叠表达式
+    }
+  ```
