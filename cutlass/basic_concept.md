@@ -280,3 +280,27 @@ Coord是表示一个坐标的模板类，
 
 # 辅助工具及方法
 ## 单测试用例执行方法
+
+
+
+probShape是实际输入的矩阵,tileShape是拆分维度信息,对gemm来说,tileShape这个是一个cluster处理的数据,刚好拆分给4个ipu。对unary来说,还要继续拆atomShape
+
+template <class ElementwiseUnaryOperation,
+          class ElementwiseUnaryLayout_ = Layout<Shape<_1, _1>>,
+          class BlockTiler_     = Tile<Underscore, Underscore>,
+          class AtomTiler_     = Tile<Underscore, Underscore>>
+struct TiledElementwiseUnary : ElementwiseUnary_Traits<ElementwiseUnaryOperation> {}
+参数说明:
+ElementwiseUnaryOperation:操作函数,如log,exp,sigmoid等。
+ElementwiseUnaryLayout_:表示block中各个Thread的排列方式,对应到MLU就是各个ipu的排列方式,默认为列主序;
+BlockTiler_:表示总的处理数据量;
+AtomTiler_:表示block中每个Thread处理的数据量,即AtomTiler按照ElementwiseUnaryLayout_排列,就是单次单个cluster处理的数据量。
+
+
+TiledElementwiseUnary负责进行数据拆分,然后调用ElementwiseUnaryOperation进行计算。
+
+
+
+论文链接: https://dl.acm.org/doi/pdf/10.1145/3582016.3582018
+参考资料: https://zhuanlan.zhihu.com/p/661182311
+参考资料: https://zhuanlan.zhihu.com/p/662089556
