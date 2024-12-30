@@ -87,7 +87,7 @@
      struct Layout
          : private cute::tuple<Shape, Stride>   // EBO for static layouts
   ```
-  - 相关函数介绍(待补充相关函数细节）
+  - 相关函数介绍(待补充相关函数细节)
     - 计算layout总的维度形状或对应单个维度的形状:shape
     - 计算layout总的维度步长或对应单个维度的步长:stride
     - 计算layout总的元素个数或对应单个维度元素个数: size
@@ -223,6 +223,23 @@
         ```
     - 生成一个相同的Layout: make_layout_like
     - make_fragment_like
+  - inner_product
+    <img src="imgs/inner_product.png" width="400" height="300">
+
+
+  - 切块，从一个Layout中切分一小块Layout，则小layout和大layout相比：
+    - 更小的shape;
+    - 和原Layout保持相同的stride;
+    - 具有不同的offset;
+      <img src="imgs/small_block_in_big_one.png" width="400" height="300">
+
+  - Tiling：
+    - aa
+      <img src="imgs/Tiling.png" width="400" height="300">
+      <img src="imgs/Tiling_shape.png" width="400" height="300">
+      <img src="imgs/Layout_tiling_shape_with_stride.png" width="400" height="300">
+      <img src="imgs/expample_of_layout_tiling_with_shape.png" width="400" height="300">
+    
 
 ### 计算stride的方式
   - 主要分为两种方式, 即列主序LayoutLeft和行主序LayoutRight。两者调用函数基本一直, 只存在于最后构造Tuple的方式存在差异。列主序通过append进行顺序展开, 列主序则通过prepend进行从后进行展开。
@@ -269,7 +286,7 @@
 Hierarchy layout相对torch中的size/stride进行了延伸,其支持嵌套结构的封装。论文中的说明:We introduce a novel representation for tensor shapes, layouts and tiles. Graphene's tensors are decomposable into tiles represented as smaller nested tensors。表示方式为:((内部行数,外部行数1, 外部行数2,...),(内部列数,外部列数1,外部列数2,...))。
  - 例子1:Hierarchy layout -> Normal layout
    假设Hierarchy layout的shape为:((2,4), (3,5)),stride为:((1, 6), (2,24))。其表示内层数据块的shape为(2,3),且为行主序。外层数据块的shape为(4,5),且为列主序。
-   <img src="Hierarchy_layout_to_normal_layout.png" width="400" height="300">
+   <img src="imgs/Hierarchy_layout_to_normal_layout.png" width="400" height="300">
    转化为Normal Layout,其shape为:(4,5,2,3),stride为:(6,24,3,1)。
    对应取数坐标如下:
    auto row_coord = make_coord(1, 2);
@@ -319,3 +336,4 @@ TiledElementwiseUnary负责进行数据拆分,然后调用ElementwiseUnaryOperat
 论文链接: https://dl.acm.org/doi/pdf/10.1145/3582016.3582018
 参考资料: https://zhuanlan.zhihu.com/p/661182311
 参考资料: https://zhuanlan.zhihu.com/p/662089556
+参考资料: https://www.youtube.com/watch?v=G6q719ck7ww
