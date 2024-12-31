@@ -77,9 +77,47 @@
           CUTE_GCC_UNREACHABLE;
         }
       ```
+  - compact函数，基于Major方式计算对应的stride。
+    - 主要分为两种方式, 即列主序LayoutLeft和行主序LayoutRight。两者调用函数基本一直, 只存在于最后构造Tuple的方式存在差异。列主序通过append进行顺序展开, 列主序则通过prepend进行从后进行展开。
+    - 代码路径: include/cute/stride.hpp
+      ```c++
+        template <class Major, class Shape, class Current>
+        CUTE_HOST_DEVICE constexpr
+        auto
+        compact(Shape   const& shape,
+                Current const& current)
+        {
+          if constexpr (is_tuple<Shape>::value) { // Shape::tuple Current::int
+            using Lambda = CompactLambda<Major>;                  // Append or Prepend
+            using Seq    = typename Lambda::template seq<Shape>;  // Seq or RSeq
+            return cute::detail::fold(shape, cute::make_tuple(cute::make_tuple(), current), Lambda{}, Seq{});
+          } else {                                // Shape::int Current::int
+            if constexpr (is_constant<1, Shape>::value) {
+              return cute::make_tuple(Int<0>{}, current); // If current is dynamic, this could save a reg
+            } else {
+              return cute::make_tuple(current, current * shape);
+            }
+          }
+
+          CUTE_GCC_UNREACHABLE;
+        }
+        // 其中CompactLambda的处理就是通过乘法逐步向后进行依次处理。
+        template <>
+        struct CompactLambda<LayoutLeft>
+        {
+          template <class Init, class Shape>
+          CUTE_HOST_DEVICE constexpr auto
+          operator()(Init const& init, Shape const& si) {
+            auto result = detail::compact<LayoutLeft>(si, get<1>(init));
+            return cute::make_tuple(append(get<0>(init), get<0>(result)), get<1>(result));  // Append
+          }
+
+          template <class Shape>
+          using seq = tuple_seq<Shape>;                                                     // Seq
+        };
+      ```
 
 ## Layout
-
   - 代码路径: include/cute/layout.hpp
   - 大多数场景按照默认列模式的方式进行构造Layout。
   ```c++
@@ -87,7 +125,7 @@
      struct Layout
          : private cute::tuple<Shape, Stride>   // EBO for static layouts
   ```
-  - 相关函数介绍(待补充相关函数细节）
+  - 相关函数介绍(待补充相关函数细节)
     - 计算layout总的维度形状或对应单个维度的形状:shape
     - 计算layout总的维度步长或对应单个维度的步长:stride
     - 计算layout总的元素个数或对应单个维度元素个数: size
@@ -151,6 +189,56 @@
           crd2idx(Coord const& c, Layout<Shape,Stride> const& layout)
           {
             return crd2idx(c, layout.shape(), layout.stride());
+          }
+        ```
+    - 基于Coord进layout切片： slice
+      - 相对与pytorch的slice，其不支持跳步（step）的处理。
+      - 如果对应切片维度为Underscore（也就是_，对应Int<0> {}），则表示该维度全部获取;
+      - 如果对应切片维度为具体值，则返回切片后的维度为空。
+      - **对应维度通过Underscore获取后，sub-layout会保持对应shape和stride的维度数值大小。**
+      - example:
+        ```plain text
+          auto layout = make_layout(make_shape (Int<5>{}, Int<2>{}, Int<3>{}),
+                                    make_stride(Int<1>{}, 4, Int<3>{}));
+          auto coord = cute::make_coord(_, 1, _);   // (_5,_3):(_1,_3)
+        ```
+      - code:
+        ```c++
+          template <class Coord, class Shape, class Stride>
+          CUTE_HOST_DEVICE constexpr
+          auto
+          slice(Coord const& c, Layout<Shape,Stride> const& layout)
+          {
+          return make_layout(slice(c, layout.shape()),
+                             slice(c, layout.stride()));
+          }
+          // underscore.hpp中实现：
+          template <class A, class B>
+          CUTE_HOST_DEVICE constexpr
+          auto
+          slice(A const& a, B const& b)
+          {
+            if constexpr (is_tuple<A>::value) {
+              static_assert(tuple_size<A>::value == tuple_size<B>::value, "Mismatched Ranks");
+              return filter_tuple(a, b, [](auto const& x, auto const& y) { return detail::lift_slice(x,y); });
+            } else if constexpr (is_underscore<A>::value) {
+              return b;
+            } else {
+              return cute::tuple<>{};
+            }
+
+            CUTE_GCC_UNREACHABLE;
+          }
+        ```
+    - 基于Coord进layout切片，并计算偏移位置： slice_and_offset
+      - code:
+        ```c++
+          template <class Coord, class Shape, class Stride>
+          CUTE_HOST_DEVICE constexpr
+          auto
+          slice_and_offset(Coord const& c, Layout<Shape,Stride> const& layout)
+          {
+            return cute::make_tuple(slice(c, layout), crd2idx(c, layout));
           }
         ```
     - 构造Layout函数: make_layout
@@ -223,46 +311,6 @@
         ```
     - 生成一个相同的Layout: make_layout_like
     - make_fragment_like
-
-### 计算stride的方式
-  - 主要分为两种方式, 即列主序LayoutLeft和行主序LayoutRight。两者调用函数基本一直, 只存在于最后构造Tuple的方式存在差异。列主序通过append进行顺序展开, 列主序则通过prepend进行从后进行展开。
-  - 代码路径: include/cute/stride.hpp
-    ```c++
-      template <class Major, class Shape, class Current>
-      CUTE_HOST_DEVICE constexpr
-      auto
-      compact(Shape   const& shape,
-              Current const& current)
-      {
-        if constexpr (is_tuple<Shape>::value) { // Shape::tuple Current::int
-          using Lambda = CompactLambda<Major>;                  // Append or Prepend
-          using Seq    = typename Lambda::template seq<Shape>;  // Seq or RSeq
-          return cute::detail::fold(shape, cute::make_tuple(cute::make_tuple(), current), Lambda{}, Seq{});
-        } else {                                // Shape::int Current::int
-          if constexpr (is_constant<1, Shape>::value) {
-            return cute::make_tuple(Int<0>{}, current); // If current is dynamic, this could save a reg
-          } else {
-            return cute::make_tuple(current, current * shape);
-          }
-        }
-
-        CUTE_GCC_UNREACHABLE;
-      }
-      // 其中CompactLambda的处理就是通过乘法逐步向后进行依次处理。
-      template <>
-      struct CompactLambda<LayoutLeft>
-      {
-        template <class Init, class Shape>
-        CUTE_HOST_DEVICE constexpr auto
-        operator()(Init const& init, Shape const& si) {
-          auto result = detail::compact<LayoutLeft>(si, get<1>(init));
-          return cute::make_tuple(append(get<0>(init), get<0>(result)), get<1>(result));  // Append
-        }
-
-        template <class Shape>
-        using seq = tuple_seq<Shape>;                                                     // Seq
-      };
-    ```
 
 
 ## Hierarchy Layout
