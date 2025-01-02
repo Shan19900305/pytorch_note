@@ -120,11 +120,11 @@
 ## Layout
   - 代码路径: include/cute/layout.hpp
   - 大多数场景按照默认列模式的方式进行构造Layout。
-  ```c++
-     template <class Shape, class Stride = LayoutLeft::Apply<Shape> >
-     struct Layout
+    ```c++
+      template <class Shape, class Stride = LayoutLeft::Apply<Shape> >
+      struct Layout
          : private cute::tuple<Shape, Stride>   // EBO for static layouts
-  ```
+    ```
   - 相关函数介绍(待补充相关函数细节)
     - 计算layout总的维度形状或对应单个维度的形状:shape
     - 计算layout总的维度步长或对应单个维度的步长:stride
@@ -242,6 +242,7 @@
           }
         ```
     - 构造Layout函数: make_layout
+      - 支持多种方式进行layout处理，如果仅携带shape信息，则默认按照列模式处理。
     - 按照给定序列顺序进行stride生产构造: make_ordered_layout(Shape const& shape, Order const& order)
       - example:
         ```Plain text
@@ -311,9 +312,84 @@
         ```
     - 生成一个相同的Layout: make_layout_like
     - make_fragment_like
-  - inner_product
-    <img src="imgs/inner_product.png" width="400" height="300">
+    - inner_product
+      <img src="imgs/inner_product.png" width="400" height="300">
+    - complement
+      - code:
+        ```c++
+          template <class Shape, class Stride, class CoTarget>
+          CUTE_HOST_DEVICE constexpr
+          auto
+          complement(Shape const& shape, Stride const& stride, CoTarget const& cotarget)
+          {
+            std::cout << "complement input shape: " << shape
+                      << " input stride: " << stride
+                      << " cotarget: " << cotarget << std::endl;
+            if constexpr (is_constant<0, Stride>::value) {
+              // Special case for irreducible rank-1 stride-0 layout
+              return make_layout(coalesce(cotarget));
+            } else {
+              // General case
+              constexpr int R = rank_v<Shape>;
+              static_assert(R == 1 || is_static<Stride>::value,
+                            "Dynamic-stride complement only for rank-1 layouts");
 
+              // Should just be a sort and a fold...
+              // Then we could even handle dynamic strides (but they would destroy all static strides)
+              auto [shape_, stride_, result_shape_, result_stride] =
+                fold(make_seq<R-1>{},
+                    cute::make_tuple(shape, stride, cute::make_tuple(), cute::make_tuple(Int<1>{})),
+                    [](auto const& init, auto i)
+                    {
+                        auto [shape, stride, result_shape, result_stride] = init;
+                        std::cout << "i: " << i << std::endl;
+                        auto min_stride = cute::min(stride);
+                        auto min_idx    = cute::find(stride, min_stride);
+                        auto new_shape  = min_stride / get<i>(result_stride);
+                        auto new_stride = min_stride * get<min_idx>(shape);
+                        static_assert(not is_constant<0, decltype(new_shape)>::value, "Non-injective Layout detected in complement.");
+
+                        return cute::make_tuple(remove<min_idx>(shape),              // Remove the min_idx from shape
+                                                remove<min_idx>(stride),             // Remove the min_idx from stride
+                                                append(result_shape , new_shape ),   // new shape  = min_stride / last_stride
+                                                append(result_stride, new_stride));  // new stride = min_stride * curr_shape
+                      });
+
+              // Append the last shape mode
+              std::cout << "after fold shape_: " << shape_ << " stride_: " << stride_ << std::endl;
+              std::cout << "result_shape_: " << result_shape_ << " result_stride: " << result_stride << std::endl;
+              auto new_shape    = get<0>(stride_) / get<R-1>(result_stride);         // new shape  = min_stride / last_stride
+              static_assert(not is_constant<0, decltype(new_shape)>::value, "Non-injective Layout detected in complement.");
+              auto result_shape = append(result_shape_, new_shape);
+              std::cout << "result_shape_: " << result_shape << " result_stride: " << result_stride << std::endl;
+
+              // Compute the rest_shape and rest_stride
+              auto new_stride  = get<0>(stride_) * get<0>(shape_);                   // new stride = min_stride * curr_shape
+              std::cout << "new_stride: " << new_stride << std::endl;
+              auto rest_shape  = coalesce(ceil_div(cotarget, new_stride));
+              auto rest_stride = compact_major<LayoutLeft>(rest_shape, new_stride);
+              std::cout << "rest_shape: " << rest_shape << " rest_stride: " << rest_stride << std::endl;
+              // Coalesce and append (rest_shape, rest_stride)
+              return coalesce(make_layout(make_shape (result_shape , rest_shape ),
+                                          make_stride(result_stride, rest_stride)));
+            }
+
+            CUTE_GCC_UNREACHABLE;
+          }
+        ```
+      - example
+        ```plain text
+          auto layout = make_layout(Shape<_2,_4,_8>{}, Step<_8,_1,_64>{});
+          auto result = complement(layout, cosize(layout)); // (_2,_4):(_4,_16)
+          // log of complement function
+          complement input shape: (_2,_4,_8) input stride: (_8,_1,_64) cotarget: _460
+          after fold shape_: (_8) stride_: (_64)
+          result_shape_: (_1,_2) result_stride: (_1,_4,_16)
+          result_shape_: (_1,_2,_4) result_stride: (_1,_4,_16)
+          new_stride: _512
+          rest_shape: _1 rest_stride: _0
+          complement((_2,_4,_8):(_8,_1,_64), _460)  =>  (_2,_4):(_4,_16)
+        ```
 
   - 切块，从一个Layout中切分一小块Layout，则小layout和大layout相比：
     - 更小的shape;
