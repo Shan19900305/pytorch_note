@@ -311,10 +311,7 @@
 
         ```
     - 生成一个相同的Layout: make_layout_like
-    - make_fragment_like
-    - inner_product
-      <img src="imgs/inner_product.png" width="400" height="300">
-    - complement
+    - complement：
       - code:
         ```c++
           template <class Shape, class Stride, class CoTarget>
@@ -377,7 +374,7 @@
             CUTE_GCC_UNREACHABLE;
           }
         ```
-      - example
+      - example1:
         ```plain text
           auto layout = make_layout(Shape<_2,_4,_8>{}, Step<_8,_1,_64>{});
           auto result = complement(layout, cosize(layout)); // (_2,_4):(_4,_16)
@@ -390,6 +387,20 @@
           rest_shape: _1 rest_stride: _0
           complement((_2,_4,_8):(_8,_1,_64), _460)  =>  (_2,_4):(_4,_16)
         ```
+      - example2:
+        ```plain text
+          //
+          https://github.com/NVIDIA/cutlass/blob/main/examples/cute/tutorial/tiled_copy.cu
+        ```
+
+    - logical_divide: 
+      <img src="imgs/expample_of_layout_tiling_with_shape.png" width="400" height="300">
+    - tiled_divide
+      <img src="imgs/Layout_tiling_shape_with_stride.png" width="400" height="300">
+    - make_fragment_like
+    - inner_product
+      <img src="imgs/inner_product.png" width="400" height="300">
+
 
   - 切块，从一个Layout中切分一小块Layout，则小layout和大layout相比：
     - 更小的shape;
@@ -401,8 +412,8 @@
     - aa
       <img src="imgs/Tiling.png" width="400" height="300">
       <img src="imgs/Tiling_shape.png" width="400" height="300">
-      <img src="imgs/Layout_tiling_shape_with_stride.png" width="400" height="300">
-      <img src="imgs/expample_of_layout_tiling_with_shape.png" width="400" height="300">
+      
+      
     
 
 
@@ -456,8 +467,9 @@ AtomTiler_:表示block中每个Thread处理的数据量,即AtomTiler按照Elemen
 TiledElementwiseUnary负责进行数据拆分,然后调用ElementwiseUnaryOperation进行计算。
 
 
-
+官方对于layout运算说明：https://research.colfax-intl.com/wp-content/uploads/2024/01/layout_algebra.pdf
 论文链接: https://dl.acm.org/doi/pdf/10.1145/3582016.3582018
 参考资料: https://zhuanlan.zhihu.com/p/661182311
 参考资料: https://zhuanlan.zhihu.com/p/662089556
 参考资料: https://www.youtube.com/watch?v=G6q719ck7ww
+TMA资料：https://research.colfax-intl.com/tutorial-hopper-tma/
